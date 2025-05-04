@@ -1,0 +1,61 @@
+#include <SPI.h>
+#include <nRF24L01.h>
+#include <RF24.h>
+
+// Chân kết nối NRF24L01 trên Arduino Nano
+#define CE_PIN   9    // Chân CE của NRF24L01 nối với D9
+#define CSN_PIN  10   // Chân CSN của NRF24L01 nối với D10
+
+// Địa chỉ pipe 5 byte cho việc truyền NRF24L01 (phải giống hệt trên RX)
+const byte address[6] = "00001";  // 5 byte địa chỉ + 1 byte kết thúc chuỗi
+
+// Tạo đối tượng radio từ thư viện RF24
+RF24 radio(CE_PIN, CSN_PIN);
+
+// Cấu trúc dữ liệu gửi đi: gồm 2 giá trị 16-bit (throttle và steering)
+struct DataPacket {
+  int16_t throttle;
+  int16_t steering;
+} data;
+
+void setup() {
+  // Khởi động Serial để debug
+  Serial.begin(9600);
+
+  // Khởi tạo module NRF24L01
+  radio.begin();
+  radio.openWritingPipe(address);         // Thiết lập địa chỉ pipe đích để gửi :contentReference[oaicite:1]{index=1}
+  radio.setPALevel(RF24_PA_HIGH);          // Công suất thấp (tiết kiệm năng lượng, tầm gần)
+  radio.stopListening();                 // Chuyển NRF24L01 sang chế độ truyền :contentReference[oaicite:2]{index=2}
+
+  // Khởi tạo các chân analog (không cần pinMode vì analog input mặc định) 
+  // Joystick tiến/lùi -> A3, Joystick trái/phải -> A1
+}
+
+void loop() {
+  // Đọc giá trị joystick từ các ngõ vào analog
+  int analogThrottle = analogRead(A3);  // Đọc cần tiến/lùi (giá trị 0-1023)
+  int analogSteering = analogRead(A1);  // Đọc cần trái/phải (giá trị 0-1023)
+
+  // Chuyển đổi giá trị analog sang giá trị có dấu với điểm giữa ~0
+  // Giả sử cần ở vị trí trung tâm (~512) tương ứng 0; đẩy lên tối đa ~1023 -> +511; đẩy xuống ~0 -> -512
+  data.throttle = (analogThrottle - 480)/2;
+  data.steering = (analogSteering - 480)/2;
+
+  // Áp dụng deadzone để loại bỏ nhiễu nhỏ xung quanh điểm giữa joystick
+  const int16_t DEADZONE = 20;  // Ngưỡng deadzone (biên độ +/-20 quanh tâm sẽ coi như 0)
+  if (abs(data.throttle) < DEADZONE) data.throttle = 0;
+  if (abs(data.steering) < DEADZONE) data.steering = 0;
+
+  // Gửi cấu trúc dữ liệu (throttle, steering) qua NRF24L01
+  radio.write(&data, sizeof(data));  // Truyền toàn bộ gói dữ liệu (2 giá trị int16_t)
+
+  // In ra Serial các giá trị để theo dõi
+  Serial.print("Throttle: ");
+  Serial.print(data.throttle);
+  Serial.print("  Steering: ");
+  Serial.println(data.steering);
+
+  // Chờ một khoảng thời gian ngắn trước lần đọc/gửi tiếp theo (giảm tải truyền và dễ đọc Serial)
+  delay(50);  // 50ms tương đương tần số ~20Hz
+}
