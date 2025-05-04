@@ -1,0 +1,127 @@
+#include <Servo.h>
+
+// ==== Cấu hình chân ====
+const int servoLeftPin  = 2;  // Servo bên trái (quay trái khi phanh)
+const int servoRightPin = 3;  // Servo bên phải (quay phải khi phanh)
+
+const int trigFront = 4;
+const int echoFront = 5;
+const int trigLeft  = 6;
+const int echoLeft  = 7;
+const int trigRight = 8;
+const int echoRight = 9;
+
+const int ledGreen  = A1;
+const int ledYellow = A2;
+const int ledRed    = A3;
+///phanh
+const int phanh = 10;
+Servo servoLeft;
+Servo servoRight;
+
+// Góc mặc định
+const int releaseAngle = 45;  // Góc nhả phanh
+
+// Trạng thái
+bool isBraking = false;
+
+void setup() {
+  Serial.begin(9600);
+
+  // Gắn servo
+  servoLeft.attach(servoLeftPin);
+  servoRight.attach(servoRightPin);
+  servoLeft.write(releaseAngle);
+  servoRight.write(releaseAngle);
+
+  // LED
+  pinMode(ledGreen, OUTPUT);
+  pinMode(ledYellow, OUTPUT);
+  pinMode(ledRed, OUTPUT);
+  //phanh
+  pinMode(phanh, OUTPUT);
+  // Cảm biến
+  pinMode(trigFront, OUTPUT); pinMode(echoFront, INPUT);
+  pinMode(trigLeft, OUTPUT);  pinMode(echoLeft, INPUT);
+  pinMode(trigRight, OUTPUT); pinMode(echoRight, INPUT);
+
+  Serial.println("=== He thong 2 servo da san sang ===");
+}
+
+long readDistanceCM(int trigPin, int echoPin) {
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+  long duration = pulseIn(echoPin, HIGH, 25000);
+  if (duration == 0) return 999;
+  return duration * 0.034 / 2;
+}
+
+void brake() {
+  Serial.println("* PHANH: Quay servo sang hai phía *");
+  // Quay trái - giảm dần góc
+  for (int angle = releaseAngle; angle >= 0; angle--) {
+    servoLeft.write(angle);
+    delay(2);  // tốc độ xoay ~90 độ/0.5s
+  }
+
+  // Quay phải - tăng dần góc
+  for (int angle = releaseAngle; angle <= 90; angle++) {
+    servoRight.write(angle);
+    delay(2);
+  }
+
+  isBraking = true;
+}
+
+void releaseBrake() {
+  Serial.println("* NHA PHANH: Quay ve 45 do *");
+  servoLeft.write(releaseAngle);
+  servoRight.write(releaseAngle);
+  isBraking = false;
+}
+
+void loop() {
+  long dFront = readDistanceCM(trigFront, echoFront);
+  long dLeft  = readDistanceCM(trigLeft, echoLeft);
+  long dRight = readDistanceCM(trigRight, echoRight);
+
+  long minDist = min(dFront, min(dLeft, dRight));
+
+  Serial.print("[Khoang cach] Truoc: ");
+  Serial.print(dFront); Serial.print(" | Trai: ");
+  Serial.print(dLeft); Serial.print(" | Phai: ");
+  Serial.print(dRight); Serial.print(" => Min: ");
+  Serial.println(minDist);
+
+  if (minDist <= 15 && !isBraking) {
+    digitalWrite(ledRed, HIGH);
+    digitalWrite(ledYellow, LOW);
+    digitalWrite(ledGreen, LOW);
+    digitalWrite(phanh, HIGH);
+    brake();
+  } 
+  else if (minDist > 15 && minDist <= 20) {
+    digitalWrite(ledRed, LOW);
+    digitalWrite(ledYellow, HIGH);
+    digitalWrite(ledGreen, LOW);
+    digitalWrite(phanh, HIGH);
+  } 
+  else if (minDist > 20 && isBraking) {
+    digitalWrite(ledRed, LOW);
+    digitalWrite(ledYellow, LOW);
+digitalWrite(ledGreen, HIGH);
+    releaseBrake();
+    digitalWrite(phanh, LOW);
+  } 
+  else if (minDist > 20 && !isBraking) {
+    digitalWrite(ledRed, LOW);
+    digitalWrite(ledYellow, LOW);
+    digitalWrite(ledGreen, HIGH);
+    digitalWrite(phanh, LOW);
+  }
+
+  delay(200);
+}
