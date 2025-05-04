@@ -1,0 +1,108 @@
+#include <SPI.h>
+#include <nRF24L01.h>
+#include <RF24.h>
+
+// ==== Cấu hình NRF24L01 ==== 
+#define CE_PIN   9
+#define CSN_PIN  10
+const byte address[6] = "00001";
+
+RF24 radio(CE_PIN, CSN_PIN);
+
+// ==== Điều khiển L298N ====
+const int IN1 = 3;
+const int IN2 = 4;
+const int ENA = 5;
+const int IN3 = 7;
+const int IN4 = 8;
+const int ENB = 6;
+
+// ==== Chân tín hiệu khóa chế độ ====
+const int phanh = 2;  // D2
+
+bool usePWM = true;
+const int DEADBAND = 25;
+
+struct ControlData {
+  int16_t throttle;
+  int16_t steering;
+} rxData;
+
+void setup() {
+  Serial.begin(9600);
+
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(ENA, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+  pinMode(ENB, OUTPUT);
+
+  pinMode(phanh, INPUT);  // Chân D2 để kiểm soát chế độ
+
+  digitalWrite(IN1, LOW); digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW); digitalWrite(IN4, LOW);
+  analogWrite(ENA, 0); analogWrite(ENB, 0);
+
+  radio.begin();
+  radio.setPALevel(RF24_PA_LOW);
+  radio.openReadingPipe(0, address);
+  radio.startListening();
+
+  Serial.println(F("RX da san sang, cho tin hieu..."));
+}
+
+void driveMotor(int INa, int INb, int EN, int speed) {
+  if (speed > 0) {
+    digitalWrite(INa, HIGH);
+    digitalWrite(INb, LOW);
+    usePWM ? analogWrite(EN, constrain(speed, 0, 255)) : digitalWrite(EN, HIGH);
+  } else if (speed < 0) {
+    digitalWrite(INa, LOW);
+    digitalWrite(INb, HIGH);
+    usePWM ? analogWrite(EN, constrain(-speed, 0, 255)) : digitalWrite(EN, HIGH);
+  } else {
+    digitalWrite(INa, LOW); digitalWrite(INb, LOW);
+    usePWM ? analogWrite(EN, 0) : digitalWrite(EN, LOW);
+  }
+}
+
+void loop() {
+  if (radio.available()) {
+    radio.read(&rxData, sizeof(rxData));
+    int throttle = rxData.throttle;
+    int steering = rxData.steering;
+
+    if (abs(throttle) < DEADBAND) throttle = 0;
+    if (abs(steering) < DEADBAND) steering = 0;
+
+    bool chanD2 = digitalRead(phanh);  // HIGH = chỉ cho phép lùi
+
+    if (chanD2 == HIGH) {
+      if (throttle < 0) {
+        int speedLeft = throttle;
+        int speedRight = throttle;
+        driveMotor(IN1, IN2, ENA, speedLeft);
+        driveMotor(IN3, IN4, ENB, speedRight);
+        Serial.println("D2 = HIGH → CHI DUOC LUI");
+      } else {
+        driveMotor(IN1, IN2, ENA, 0);
+        driveMotor(IN3, IN4, ENB, 0);
+        Serial.println("D2 = HIGH → TIEN/TRAI/PHAI bi khoa");
+      }
+    } else {
+      int speedLeft = throttle + steering;
+      int speedRight = throttle - steering;
+      speedLeft = constrain(speedLeft, -255, 255);
+      speedRight = constrain(speedRight, -255, 255);
+
+      driveMotor(IN1, IN2, ENA, speedLeft);
+      driveMotor(IN3, IN4, ENB, speedRight);
+    }
+
+    // Debug
+    Serial.print("Throttle = "); Serial.print(throttle);
+    Serial.print(", Steering = "); Serial.print(steering);
+    Serial.print(", D2 = "); Serial.println(chanD2 == HIGH ? "HIGH (LOCK)" : "LOW (NORMAL)");
+  }
+}
